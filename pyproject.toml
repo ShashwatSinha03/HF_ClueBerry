@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "clueberry"
+version = "0.1.0"
+description = "Local-first, evidence-driven GitHub issue and pull request investigation tool."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.12,<0.13",
+    "click>=8.1,<8.2",
+    "rich>=13.7,<14",
+    "pydantic>=2.7,<3",
+    "pydantic-settings>=2.2,<3",
+    "httpx>=0.27,<0.28",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<9",
+    "ruff>=0.4,<0.5",
+]
+
+[project.scripts]
+clueberry = "clueberry.main:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/clueberry"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

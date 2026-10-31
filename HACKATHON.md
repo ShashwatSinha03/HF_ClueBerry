@@ -13,11 +13,15 @@ Breadcrumbs
 Problem 02 — Evidence-Based Open Source Issue and Pull Request Triage
 
 ## Project Name
-ProofCheck AI
+Clueberry
+
+(Originally declared as ProofCheck AI in the initial commit; the team has
+since finalized the project name as Clueberry. The concept and problem
+selection are unchanged.)
 
 ## Project Description
-ProofCheck AI is an evidence-driven GitHub issue and pull request
-triage system.
+Clueberry is a local-first, CLI-first, evidence-driven GitHub issue and
+pull request investigation tool.
 
 It analyzes technical claims made in incoming issues and pull
 requests, investigates the relevant source code and project
@@ -55,7 +59,9 @@ The team will update this declaration if the actual model
 or configuration changes.
 
 ## AI Coding Assistants
-OpenCode — used for development assistance.
+OpenCode — used for the initial repository setup (first commit).
+Claude Code — used for subsequent development, starting with the
+project foundation sprint.
 
 ## Repository
-https://github.com/ShashwatSinha03/HF_Breadcrumbs
+https://github.com/ShashwatSinha03/HF_ClueBerry

@@ -116,7 +116,9 @@ images or HTML into the report.
 
 ## Configuration
 
-All settings are environment variables (a `.env` file also works).
+All settings are environment variables. They can also be put in a `.env`
+file, which is read from the directory you run Clueberry from (not from the
+project or install directory).
 
 | Variable | Default | Purpose |
 |---|---|---|

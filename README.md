@@ -16,13 +16,12 @@ docs, tests, history) rather than trusting the claim at face value.
 
 ## Current project status
 
-**Foundation stage only.** This repository currently provides the project
-skeleton — packaging, CLI entry point, configuration, tests, and CI — and
-**does not yet perform any investigation**. In particular, the following are
-not implemented yet: GitHub API integration, repository inspection, local
-model inference, claim extraction, evidence collection/verification, or
-report generation. These will be added in later, separately reviewed
-sprints.
+**GitHub intake stage.** Clueberry can fetch and summarize a public GitHub
+issue or pull request (`clueberry fetch <url>`), but it **does not yet
+investigate anything**. In particular, the following are not implemented
+yet: cloning or inspecting repository source code, local model inference,
+claim extraction, evidence collection/verification, or report generation.
+These will be added in later, separately reviewed sprints.
 
 ## Planned technology stack
 
@@ -31,8 +30,7 @@ sprints.
 - [Rich](https://rich.readthedocs.io/) — terminal output
 - [Pydantic](https://docs.pydantic.dev/) / Pydantic Settings — structured
   data and configuration
-- [httpx](https://www.python-httpx.org/) — GitHub API communication
-  (planned; not yet used)
+- [httpx](https://www.python-httpx.org/) — GitHub REST API communication
 - [Ollama](https://ollama.com/) running a local open-weight model
   (**Qwen3-4B**, candidate — selected but not yet integrated)
 - [pytest](https://docs.pytest.org/) — testing
@@ -58,10 +56,33 @@ pip install -e ".[dev]"
 clueberry --help
 clueberry --version
 clueberry info
+clueberry fetch <github-issue-or-pr-url>
 ```
 
 `clueberry info` prints a short message identifying the project and its
-current (foundation-only) status. There is no `analyze` command yet.
+current status.
+
+`clueberry fetch` accepts a public GitHub issue or pull request URL
+(`https://github.com/<owner>/<repo>/issues/<number>` or
+`.../pull/<number>`), retrieves its metadata, body, and comments (plus,
+for pull requests, the changed-file list and line counts) via the public
+GitHub REST API, and prints a concise summary. For example:
+
+```bash
+clueberry fetch https://github.com/octocat/Hello-World/issues/1
+```
+
+Unauthenticated access works for public issues/PRs but is subject to
+GitHub's lower rate limit. To use a higher limit, set a personal access
+token as an environment variable:
+
+```bash
+export CLUEBERRY_GITHUB_TOKEN=ghp_your_token_here
+```
+
+There is no `analyze` command yet — `fetch` only retrieves and displays
+GitHub data; it does not inspect repository source code or assess any
+claims.
 
 ## Development
 

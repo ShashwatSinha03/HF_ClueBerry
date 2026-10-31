@@ -61,6 +61,7 @@ class PullRequestExtra(BaseModel):
     mergeable: bool | None = None
     base_ref: str
     head_ref: str
+    head_sha: str | None = None
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> PullRequestExtra:
@@ -72,6 +73,7 @@ class PullRequestExtra(BaseModel):
                 "mergeable": data.get("mergeable"),
                 "base_ref": data["base"]["ref"],
                 "head_ref": data["head"]["ref"],
+                "head_sha": data["head"].get("sha"),
             }
         )
 

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from clueberry import __version__
 from clueberry.config import Settings
@@ -16,6 +18,12 @@ from clueberry.github import (
     GitHubResourceNotFoundError,
     InvalidGitHubURLError,
     parse_github_issue_or_pr_url,
+)
+from clueberry.investigation import (
+    InspectionError,
+    InspectionResult,
+    inspect_repository,
+    target_from_fetch_result,
 )
 
 app = typer.Typer(
@@ -42,7 +50,7 @@ def callback(
         is_eager=True,
     ),
 ) -> None:
-    """Clueberry: evidence-driven GitHub issue and PR investigation (foundation only)."""
+    """Clueberry: evidence-driven GitHub issue and PR investigation."""
 
 
 @app.command()
@@ -51,15 +59,12 @@ def info() -> None:
     console.print("[bold]Clueberry[/bold]")
     console.print("Evidence-driven GitHub issue and pull request investigation tool.")
     console.print(
-        "Status: project foundation only — investigation features are not yet implemented."
+        "Status: GitHub intake and repository evidence collection work; "
+        "claim extraction and assessment are not yet implemented."
     )
 
 
-@app.command()
-def fetch(
-    url: str = typer.Argument(..., help="A public GitHub issue or pull request URL."),
-) -> None:
-    """Fetch a public GitHub issue or pull request and print a concise summary."""
+def _fetch_or_exit(url: str) -> GitHubFetchResult:
     try:
         ref = parse_github_issue_or_pr_url(url)
     except InvalidGitHubURLError as exc:
@@ -69,7 +74,7 @@ def fetch(
     settings = Settings()
     try:
         with GitHubClient(token=settings.github_token) as client:
-            result = client.fetch(ref)
+            return client.fetch(ref)
     except GitHubResourceNotFoundError as exc:
         console.print(f"[bold red]Not found:[/bold red] {exc}")
         raise typer.Exit(code=1) from exc
@@ -83,7 +88,72 @@ def fetch(
         console.print(f"[bold red]GitHub API error:[/bold red] {exc}")
         raise typer.Exit(code=1) from exc
 
-    _print_fetch_summary(result)
+
+@app.command()
+def fetch(
+    url: str = typer.Argument(..., help="A public GitHub issue or pull request URL."),
+) -> None:
+    """Fetch a public GitHub issue or pull request and print a concise summary."""
+    _print_fetch_summary(_fetch_or_exit(url))
+
+
+@app.command("inspect")
+def inspect_command(
+    url: str = typer.Argument(..., help="A public GitHub issue or pull request URL."),
+    term: list[str] = typer.Option(
+        [], "--term", "-t", help="Extra search term to look for (repeatable)."
+    ),
+    show_text: bool = typer.Option(False, "--show-text", help="Print each evidence snippet."),
+) -> None:
+    """Inspect the repository behind an issue/PR and list the evidence collected.
+
+    Repository code is never executed; files are read from a shallow,
+    temporary git fetch that is deleted afterwards.
+    """
+    target = target_from_fetch_result(_fetch_or_exit(url), extra_terms=term)
+    console.print(f"Inspecting {target.repository} at {target.revision} …")
+    try:
+        result = inspect_repository(
+            target.clone_url,
+            target.repository,
+            revision=target.revision,
+            changed_paths=target.changed_paths,
+            search_terms=target.search_terms,
+        )
+    except InspectionError as exc:
+        console.print(f"[bold red]Inspection failed:[/bold red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    _print_inspection_summary(result, show_text=show_text)
+
+
+def _print_inspection_summary(result: InspectionResult, *, show_text: bool) -> None:
+    # Paths, terms and file text are untrusted: escape them so Rich markup in
+    # repository content can't restyle or hide output.
+    console.print(f"[bold]{escape(result.repository)}[/bold] @ {result.commit_sha}")
+    console.print(f"Search terms: {escape(', '.join(result.search_terms)) or '(none)'}")
+    console.print(
+        f"Files: {result.files_in_tree} in tree, {result.files_eligible} eligible, "
+        f"{result.files_inspected} inspected"
+    )
+    if result.skipped:
+        console.print(
+            "Skipped: " + ", ".join(f"{reason}={n}" for reason, n in result.skipped.items())
+        )
+    if result.truncated:
+        console.print("[yellow]Limits reached; results were truncated.[/yellow]")
+
+    table = Table(title=f"Evidence ({len(result.evidence)})")
+    table.add_column("Category")
+    table.add_column("Location")
+    table.add_column("Reason")
+    for item in result.evidence:
+        table.add_row(item.category, escape(item.location), escape(item.reason))
+    console.print(table)
+
+    if show_text:
+        for item in result.evidence:
+            console.print(Panel(Text(item.text), title=escape(item.location), expand=False))
 
 
 def _print_fetch_summary(result: GitHubFetchResult) -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import httpx
 
 from .models import ChangedFile, GitHubFetchResult, IssueComment, IssueDetails, PullRequestExtra
@@ -13,6 +15,11 @@ USER_AGENT = "clueberry-hackday-project"
 #: hackathon-scope tool needs to handle, while guaranteeing the loop ends.
 _MAX_PAGES = 20
 _PER_PAGE = 100
+
+
+def format_reset_time(epoch_seconds: int) -> str:
+    """Render GitHub's X-RateLimit-Reset (epoch seconds) as local date and time."""
+    return datetime.fromtimestamp(epoch_seconds).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 class GitHubAPIError(RuntimeError):
@@ -119,13 +126,14 @@ class GitHubClient:
         retry_after = response.headers.get("Retry-After")
 
         if remaining == "0":
+            reset_at = int(reset) if reset and reset.isdigit() else None
             message = "GitHub API primary rate limit exceeded."
-            if reset:
-                message += f" Resets at epoch {reset}."
+            if reset_at is not None:
+                message += f" Resets at {format_reset_time(reset_at)}."
             message += " Set CLUEBERRY_GITHUB_TOKEN for a higher limit."
             raise GitHubRateLimitError(
                 message,
-                reset_at=int(reset) if reset else None,
+                reset_at=reset_at,
                 retry_after=int(retry_after) if retry_after else None,
             )
 

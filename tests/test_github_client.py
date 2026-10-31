@@ -192,6 +192,52 @@ def test_rate_limit_raises_with_reset_time() -> None:
     assert exc_info.value.reset_at == 1700000000
 
 
+@pytest.fixture
+def utc_timezone(monkeypatch: pytest.MonkeyPatch):
+    import time
+
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_rate_limit_message_shows_readable_local_reset_time(utc_timezone: None) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            403,
+            headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1700000000"},
+            json={"message": "rate limited"},
+        )
+
+    client = GitHubClient(transport=httpx.MockTransport(handler))
+    with pytest.raises(GitHubRateLimitError) as exc_info:
+        client.fetch(_issue_ref())
+
+    message = str(exc_info.value)
+    assert "Resets at 2023-11-14 22:13:20 UTC." in message
+    assert "epoch" not in message
+    assert exc_info.value.reset_at == 1700000000
+
+
+def test_malformed_reset_header_does_not_break_rate_limit_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            403,
+            headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "soon"},
+            json={"message": "rate limited"},
+        )
+
+    client = GitHubClient(transport=httpx.MockTransport(handler))
+    with pytest.raises(GitHubRateLimitError) as exc_info:
+        client.fetch(_issue_ref())
+
+    assert exc_info.value.reset_at is None
+    assert "Resets at" not in str(exc_info.value)
+    assert "CLUEBERRY_GITHUB_TOKEN" in str(exc_info.value)
+
+
 def test_secondary_rate_limit_uses_retry_after() -> None:
     """A 429 with Retry-After but no exhausted X-RateLimit-Remaining is still a rate limit."""
 

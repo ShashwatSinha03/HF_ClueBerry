@@ -16,15 +16,14 @@ docs, tests, history) rather than trusting the claim at face value.
 
 ## Current project status
 
-**Repository investigation stage.** Clueberry can fetch a public GitHub
-issue or pull request (`clueberry fetch <url>`) and collect traceable
-evidence from the repository behind it (`clueberry inspect <url>`): source,
-documentation, test snippets and recent file history, each tied to an exact
-commit SHA, file path and line range.
+**Evidence analysis stage.** Clueberry can fetch a public GitHub issue or
+pull request (`clueberry fetch <url>`), collect traceable evidence from the
+repository behind it (`clueberry inspect <url>`), and use a local Ollama
+model to extract technical claims and assess each one against that evidence
+(`clueberry analyze <url>`).
 
-It **does not yet assess anything**. Local model inference, claim
-extraction, verdicts and final reports are not implemented; they will be
-added in later, separately reviewed sprints.
+Investigation reports (saved JSON/Markdown output and examples) are not
+implemented yet; they will be added in a later, separately reviewed sprint.
 
 ## Planned technology stack
 
@@ -35,7 +34,7 @@ added in later, separately reviewed sprints.
   data and configuration
 - [httpx](https://www.python-httpx.org/) — GitHub REST API communication
 - [Ollama](https://ollama.com/) running a local open-weight model
-  (**Qwen3-4B**, candidate — selected but not yet integrated)
+  (default **Qwen3-4B**, configurable)
 - [pytest](https://docs.pytest.org/) — testing
 - [Ruff](https://docs.astral.sh/ruff/) — linting and formatting
 - GitHub Actions — CI
@@ -119,8 +118,115 @@ lines the PR actually changed. File history is limited to the shallow fetch
 depth, and the oldest fetched commit is never reported as changing a file
 (git can't tell what it changed without its parent).
 
-There is no `analyze` command yet — Clueberry collects evidence but does
-not extract claims or assess them.
+### Claim analysis
+
+`clueberry analyze` runs `inspect`, then asks a local model to extract
+individual, testable technical claims from the issue/PR title and body and
+to assess each one against the collected evidence. Each claim gets one
+verdict:
+
+| Verdict | Meaning |
+|---|---|
+| `VERIFIED` | The evidence directly and fully supports the claim. |
+| `PARTIALLY_VERIFIED` | The evidence supports part of the claim, or only with caveats. |
+| `CONTRADICTED` | The evidence directly shows the claim is false. |
+| `INCONCLUSIVE` | The evidence is missing, unrelated or insufficient. |
+
+It needs [Ollama](https://ollama.com/) running locally with the model pulled:
+
+```bash
+ollama pull qwen3:4b
+clueberry analyze https://github.com/psf/requests/issues/7611
+```
+
+Model settings (environment variables):
+
+| Variable | Default |
+|---|---|
+| `CLUEBERRY_OLLAMA_MODEL` | `qwen3:4b` |
+| `CLUEBERRY_OLLAMA_BASE_URL` | `http://localhost:11434` |
+| `CLUEBERRY_OLLAMA_TIMEOUT_SECONDS` | `300` (per model call) |
+| `CLUEBERRY_OLLAMA_NUM_CTX` | `16384` |
+| `CLUEBERRY_OLLAMA_THINK` | unset — thinking for claim *assessment* (model default; Qwen3: on) |
+| `CLUEBERRY_OLLAMA_EXTRACTION_THINK` | `false` — thinking for claim *extraction* |
+
+#### Tested models
+
+Measured on an Apple M3 Pro (18 GB RAM), Ollama 0.40.13, against real
+`psf/requests` issues #7611 and #7600 at commit `3c7baaa` plus five
+hand-written claims with known answers.
+
+How the numbers were obtained:
+
+- **Live:** every model answer and every latency below came from real
+  Ollama calls. Verdicts for the hand-written claims were produced live
+  with each setting.
+- **Replayed:** after the live runs, two validation rules were added (the
+  citation relevance check and backtick-tolerant quote grounding). Their
+  effect was measured by replaying the saved live answers through the
+  updated code, not by a fresh end-to-end run. Replayed figures are marked.
+- **Default timings:** the default setting's latencies come from a later
+  live run that was stopped early, after issue #7611 and one claim of
+  #7600.
+
+| Model / setting | Hand-written claims correct | Latency per call | Status |
+|---|---|---|---|
+| `qwen3:4b`, extraction thinking off + assessment thinking on (**default**) | 5/5, each citing the exact supporting line (live; unchanged on replay) | extraction 10–12 s; assessment 69–156 s, one > 180 s (live) | Supported |
+| `qwen3:4b`, thinking on for both | 5/5 (live) | extraction exceeded 180 s on both issues (live) | Not recommended |
+| `qwen3:4b`, thinking off for both (`CLUEBERRY_OLLAMA_THINK=false`) | 4/5, one `VERIFIED` that should not be (live; unchanged on replay) | 7–14 s (live) | Fast but less accurate |
+| `gemma3:1b` | 1/5 live; 2/5 on replay, because the relevance check downgrades one invented "support" | 1–4 s (live) | Not suitable: paraphrases quotes (claims rejected) and answers `PARTIALLY_VERIFIED` regardless of evidence |
+
+On replay, backtick-tolerant grounding kept all 3 valid claims the model
+extracted from issue #7611, up from 1 of 3. The relevance check rejected
+none of `qwen3:4b`'s correct citations and 7 irrelevant `gemma3:1b`
+citations.
+
+The default timeout is **300 s per model call** because one live
+thinking-mode assessment exceeded the earlier 180 s limit. A call that
+still times out makes only that claim `INCONCLUSIVE`.
+
+With the default, `analyze` takes roughly 1–3 minutes per claim. Thinking
+is on for assessment because it was the only setting that got every
+benchmark verdict right; it is off for extraction because thinking made
+extraction time out. Models without thinking support work with the
+defaults (`CLUEBERRY_OLLAMA_THINK=true` would make Ollama reject them).
+
+The model only *proposes*; deterministic code decides what is accepted:
+
+- A claim is kept only if its quote appears verbatim in the issue/PR text
+  (ignoring whitespace, case, quote marks and markdown backticks).
+- Every citation must name an evidence item the model was actually shown,
+  with the same path, a line range inside that item (no lines for history
+  items), and — if a commit is cited — the inspected commit. The cited
+  lines must also share at least one meaningful word or number with the
+  claim, which rejects clearly unrelated citations. Invalid citations are
+  discarded.
+- Any verdict other than `INCONCLUSIVE` that is left without a valid
+  citation is downgraded to `INCONCLUSIVE`. The model's original answer is
+  kept as `model_verdict`.
+- Finished results are re-checked independently against the collected
+  evidence before they are returned.
+- Issue/PR text and repository content are passed to the model inside
+  markers built from a random per-request nonce, with instructions to treat
+  them strictly as data. Control characters are stripped, inputs are
+  truncated, and requests use structured (JSON schema) output at
+  temperature 0. Proxy environment variables are ignored.
+- If the model can't be reached or isn't installed, `analyze` stops before
+  doing any work. A timeout or malformed answer for one claim makes only
+  that claim `INCONCLUSIVE`.
+
+Limitations: validation proves a citation *exists* in the collected
+evidence and shares a term with the claim, not that it *supports* the
+claim — a model can still cite a loosely related line or choose the wrong
+verdict (seen with thinking off, and constantly with `gemma3:1b`). Accuracy
+was measured on a small benchmark (five hand-written claims, two real
+issues), not a large evaluation; assessment with thinking on was not
+measured end-to-end on issue #7600 because one claim timed out under the
+previous 180 s limit. A claim can be grounded in
+any sentence of the issue text, including one planted by a
+prompt-injection attempt; such claims still need valid citations to get a
+non-`INCONCLUSIVE` verdict. Verdicts depend on model quality and on what
+Sprint 2 evidence collection found (PR head snapshot only).
 
 ## Development
 

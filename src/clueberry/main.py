@@ -8,6 +8,13 @@ from rich.table import Table
 from rich.text import Text
 
 from clueberry import __version__
+from clueberry.analysis import (
+    AnalysisError,
+    AnalysisResult,
+    OllamaProvider,
+    Verdict,
+    analyze_claims,
+)
 from clueberry.config import Settings
 from clueberry.github import (
     GitHubAPIError,
@@ -22,6 +29,7 @@ from clueberry.github import (
 from clueberry.investigation import (
     InspectionError,
     InspectionResult,
+    InvestigationTarget,
     inspect_repository,
     target_from_fetch_result,
 )
@@ -59,8 +67,8 @@ def info() -> None:
     console.print("[bold]Clueberry[/bold]")
     console.print("Evidence-driven GitHub issue and pull request investigation tool.")
     console.print(
-        "Status: GitHub intake and repository evidence collection work; "
-        "claim extraction and assessment are not yet implemented."
+        "Status: GitHub intake, repository evidence collection and local-model claim "
+        "assessment work; investigation reports are not yet implemented."
     )
 
 
@@ -111,9 +119,13 @@ def inspect_command(
     temporary git fetch that is deleted afterwards.
     """
     target = target_from_fetch_result(_fetch_or_exit(url), extra_terms=term)
+    _print_inspection_summary(_inspect_or_exit(target), show_text=show_text)
+
+
+def _inspect_or_exit(target: InvestigationTarget) -> InspectionResult:
     console.print(f"Inspecting {target.repository} at {target.revision} …")
     try:
-        result = inspect_repository(
+        return inspect_repository(
             target.clone_url,
             target.repository,
             revision=target.revision,
@@ -124,7 +136,98 @@ def inspect_command(
         console.print(f"[bold red]Inspection failed:[/bold red] {exc}")
         raise typer.Exit(code=1) from exc
 
-    _print_inspection_summary(result, show_text=show_text)
+
+@app.command()
+def analyze(
+    url: str = typer.Argument(..., help="A public GitHub issue or pull request URL."),
+    term: list[str] = typer.Option(
+        [], "--term", "-t", help="Extra search term to look for (repeatable)."
+    ),
+) -> None:
+    """Extract technical claims from an issue/PR and assess them against repository evidence.
+
+    Uses a local Ollama model (CLUEBERRY_OLLAMA_MODEL, default qwen3:4b).
+    Every citation is checked against the collected evidence; verdicts
+    without a valid citation are downgraded to INCONCLUSIVE. With qwen3:4b
+    each claim takes about 1-3 minutes on an Apple M3 Pro.
+    """
+    settings = Settings()
+
+    def make_provider(think: bool | None) -> OllamaProvider:
+        return OllamaProvider(
+            settings.ollama_model,
+            base_url=settings.ollama_base_url,
+            timeout=settings.ollama_timeout_seconds,
+            num_ctx=settings.ollama_num_ctx,
+            think=think,
+        )
+
+    with (
+        make_provider(settings.ollama_think) as provider,
+        make_provider(settings.ollama_extraction_think) as extraction_provider,
+    ):
+        try:
+            provider.ensure_available()
+        except AnalysisError as exc:
+            console.print(f"[bold red]Model unavailable:[/bold red] {exc}")
+            raise typer.Exit(code=1) from exc
+
+        fetched = _fetch_or_exit(url)
+        inspection = _inspect_or_exit(target_from_fetch_result(fetched, extra_terms=term))
+        console.print(
+            f"Found {len(inspection.evidence)} evidence item(s). "
+            f"Analyzing claims with {provider.name} …"
+        )
+        try:
+            result = analyze_claims(
+                title=fetched.issue.title,
+                body=fetched.issue.body or "",
+                inspection=inspection,
+                provider=provider,
+                extraction_provider=extraction_provider,
+                kind="pull request" if fetched.kind == "pull_request" else "issue",
+            )
+        except AnalysisError as exc:
+            console.print(f"[bold red]Analysis failed:[/bold red] {exc}")
+            raise typer.Exit(code=1) from exc
+
+    _print_analysis(result)
+
+
+_VERDICT_STYLES = {
+    Verdict.VERIFIED: "bold green",
+    Verdict.PARTIALLY_VERIFIED: "bold yellow",
+    Verdict.CONTRADICTED: "bold red",
+    Verdict.INCONCLUSIVE: "bold",
+}
+
+
+def _print_analysis(result: AnalysisResult) -> None:
+    # Claims, explanations and notes derive from untrusted input: escape them.
+    console.print(f"[bold]{escape(result.repository)}[/bold] @ {result.commit_sha}")
+    console.print(f"Model: {escape(result.model)}")
+    for note in result.notes:
+        console.print(f"[yellow]{escape(note)}[/yellow]")
+
+    for assessment in result.assessments:
+        style = _VERDICT_STYLES[assessment.verdict]
+        console.print()
+        console.print(
+            f"[{style}]{assessment.verdict.value}[/{style}]  "
+            f"{assessment.claim.id}: {escape(assessment.claim.text)}"
+        )
+        console.print(f"  Quote: {escape(assessment.claim.quote)}")
+        console.print(f"  Why: {escape(assessment.explanation)}")
+        for ref in assessment.references:
+            console.print(f"  Evidence {ref.evidence_id}: {escape(ref.location)}")
+        for note in assessment.validation_notes:
+            console.print(f"  [dim]{escape(note)}[/dim]")
+
+    if result.rejected_claims:
+        console.print()
+        console.print(f"Rejected {len(result.rejected_claims)} ungrounded claim(s):")
+        for rejected in result.rejected_claims:
+            console.print(f"  - {escape(rejected.text)} ({escape(rejected.reason)})")
 
 
 def _print_inspection_summary(result: InspectionResult, *, show_text: bool) -> None:

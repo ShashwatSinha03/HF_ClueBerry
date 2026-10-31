@@ -58,6 +58,33 @@ Selected for implementation; not yet integrated.
 The team will update this declaration if the actual model
 or configuration changes.
 
+Current integration status (Sprint 3):
+Integrated through a local Ollama server behind a small provider
+interface. Qwen3-4B (`qwen3:4b`) is the default model setting and is
+used for claim extraction and claim assessment; the model is
+configurable via `CLUEBERRY_OLLAMA_MODEL`. Deterministic code
+validates every claim quote and evidence citation the model produces.
+
+Live validation (Apple M3 Pro, 18 GB RAM, Ollama 0.40.13, `qwen3:4b`
+Q4_K_M) against real psf/requests issues #7611 and #7600 and five
+hand-written claims with known answers. All model answers and timings
+below are from live Ollama calls:
+- Default setting (thinking off for extraction, on for assessment):
+  5/5 hand-written claims assessed correctly, each citing the exact
+  supporting source line; extraction 10-12 s, assessment 69-156 s per
+  claim. One assessment exceeded 180 s, so the default timeout is now
+  300 s per model call. This live run was stopped early (after issue
+  #7611 and one claim of #7600).
+- Thinking off everywhere: 4/5 correct; thinking on everywhere:
+  extraction timed out.
+- gemma3:1b was also tested live and is not suitable (1/5).
+Two validation rules added afterwards (a citation relevance check and
+backtick-tolerant quote grounding) were evaluated by replaying the saved
+live answers through the updated code, not by a new live run: qwen3:4b
+results were unchanged, and gemma3:1b moved to 2/5.
+This is a small benchmark, not a large-scale evaluation; verdicts can
+still be wrong and should be reviewed by a maintainer.
+
 ## AI Coding Assistants
 OpenCode — used for the initial repository setup (first commit).
 Claude Code — used for subsequent development, starting with the

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from clueberry.investigation.models import Evidence, InspectionResult
 
@@ -62,19 +62,23 @@ def analyze_claims(
     extraction_provider: ModelProvider | None = None,
     kind: str = "issue",
     limits: AnalysisLimits | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> AnalysisResult:
     """Extract claims from issue/PR text and assess each one against collected evidence.
 
     The model proposes claims, verdicts and citations; deterministic code decides
     what is accepted. `extraction_provider` (default: `provider`) lets claim
-    extraction use different settings, e.g. thinking off. Raises
-    ModelUnavailableError if the model can't be used at all, and
-    ModelResponseError/ModelTimeoutError if claim extraction fails. Per-claim
-    timeouts or malformed answers yield INCONCLUSIVE for that claim.
+    extraction use different settings, e.g. thinking off. `progress` receives a
+    short status message before each model call. Raises ModelUnavailableError
+    if the model can't be used at all, and ModelResponseError/ModelTimeoutError
+    if claim extraction fails. Per-claim timeouts or malformed answers yield
+    INCONCLUSIVE for that claim.
     """
     limits = limits or AnalysisLimits()
     body = body or ""
+    report = progress or (lambda message: None)
 
+    report("Extracting claims")
     system, prompt = build_extraction_prompt(
         title, body, kind=kind, max_claims=limits.max_claims, max_input_chars=limits.max_input_chars
     )
@@ -96,7 +100,8 @@ def analyze_claims(
         notes.append("No evidence was collected from the repository.")
 
     assessments: list[ClaimAssessment] = []
-    for claim in claims:
+    for number, claim in enumerate(claims, start=1):
+        report(f"Assessing claim {number}/{len(claims)}")
         if not inspection.evidence:
             assessments.append(inconclusive(claim, "No evidence was collected to assess this."))
             continue

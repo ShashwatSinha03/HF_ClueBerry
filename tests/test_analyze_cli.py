@@ -87,9 +87,11 @@ def test_analyze_prints_verdicts_and_validated_evidence(fakes: type[_ScriptedPro
 
     assert result.exit_code == 0, result.stdout
     assert SHA in result.stdout
-    assert "VERIFIED" in result.stdout
-    assert "C1: Status code 102 is mapped to [red]early-hints" in result.stdout
-    assert "Evidence E1: src/requests/status_codes.py:27" in result.stdout
+    assert "Result: 1 claim assessed: 1 VERIFIED." in result.stdout
+    assert " C1 VERIFIED" in result.stdout
+    assert "Status code 102 is mapped to [red]early-hints" in result.stdout  # markup not applied
+    assert "E1 source src/requests/status_codes.py:27" in result.stdout
+    assert '27 │     102: ("processing", "early-hints"),' in result.stdout  # cited line shown
 
 
 def test_analyze_uses_thinking_off_for_extraction_by_default(
@@ -109,6 +111,6 @@ def test_analyze_fails_fast_when_model_is_missing(
     monkeypatch.setattr(fakes, "available", False)
     result = CliRunner().invoke(main_module.app, ["analyze", URL])
 
-    assert result.exit_code == 1
+    assert result.exit_code == main_module.EXIT_MODEL
     assert "Model unavailable" in result.stdout
     assert "not installed" in result.stdout

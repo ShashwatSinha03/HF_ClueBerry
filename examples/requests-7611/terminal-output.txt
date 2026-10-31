@@ -1,0 +1,49 @@
+Inspecting psf/requests at HEAD …
+Collected 9 evidence item(s) at 3c7baaa05ab4. Analyzing with ollama/qwen3:4b (this can take a few 
+minutes) …
+
+Issue #7611: Discrepancy in status_codes.py: 102 mapped to "early-hints" instead of 103
+psf/requests @ 3c7baaa05ab4aa49cc819ce3a819d260de19c157 · model ollama/qwen3:4b
+Result: 5 claims assessed: 3 VERIFIED, 2 INCONCLUSIVE.
+  VERIFIED 3   PARTIALLY_VERIFIED 0   CONTRADICTED 0   INCONCLUSIVE 2   
+╭─  C1 VERIFIED ───────────────────────────────────────────────────────────────────────────────────╮
+│ The `requests.codes` module incorrectly maps the status code 102 to the string 'early-hints'     │
+│ instead of 103                                                                                   │
+│ Quote: In `src/requests/status_codes.py`, "early-hints" is currently associated with status code │
+│ `102` rather than `103`                                                                          │
+│ Why: Evidence E1 line 27 shows 102: ('processing', 'early-hints') confirming the claim that      │
+│ 'early-hints' is mapped to 102 (not 103).                                                        │
+│ E1 source src/requests/status_codes.py:27                                                        │
+│      27 │     102: ("processing", "early-hints"),                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─  C2 VERIFIED ───────────────────────────────────────────────────────────────────────────────────╮
+│ The `requests.codes.early_hints` attribute does not exist, causing an AttributeError when        │
+│ accessed                                                                                         │
+│ Quote: requests.codes.early_hints raises `AttributeError: 'LookupDict' object has no attribute   │
+│ 'early_hints'                                                                                    │
+│ Why: Evidence [E2] shows `codes` is a `LookupDict` (a dictionary), so `early_hints` is not an    │
+│ attribute.                                                                                       │
+│ E2 source src/requests/status_codes.py:106                                                       │
+│     106 │ codes: LookupDict[int] = LookupDict(name="status_codes")                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─  C3 VERIFIED ───────────────────────────────────────────────────────────────────────────────────╮
+│ The `requests.codes.get("early-hints")` method returns 102 instead of 103                        │
+│ Quote: `requests.codes.get("early-hints")` returns `102`                                         │
+│ Why: Evidence [E1] line 27 shows 102 maps to 'early-hints'.                                      │
+│ E1 source src/requests/status_codes.py:27                                                        │
+│      27 │     102: ("processing", "early-hints"),                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─  C4 INCONCLUSIVE ───────────────────────────────────────────────────────────────────────────────╮
+│ The RFC 9110 standard specifies that status code 102 should be mapped to 'processing' and 103 to │
+│ 'early-hints'                                                                                    │
+│ Quote: RFC 9110 §15.2.3 / RFC 2518                                                               │
+│ Why: Evidence only shows requests library's mappings, not RFC 9110 standard. Claim references    │
+│ RFC 9110 §15.2.3 but evidence lacks RFC 9110 content.                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─  C5 INCONCLUSIVE ───────────────────────────────────────────────────────────────────────────────╮
+│ The RFC 9110 standard specifies that status code 103 should be mapped to 'early-hints'           │
+│ Quote: RFC 9110 §15.2.4 / RFC 8297                                                               │
+│ Why: Evidence from requests library does not include RFC 9110 or RFC 8297; claim unverified.     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Report written to examples/requests-7611/report.md
